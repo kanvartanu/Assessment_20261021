@@ -35,7 +35,12 @@ const handle = (fn) => (req, res, next) => {
   }
 };
 
-const versionOf = (body) => (body && body.version != null ? Number(body.version) : null);
+// No coercion: "abc", 1.5 or [7] must not pass as a version.
+const versionOf = (body) => {
+  if (!body || body.version == null) return null;
+  if (!Number.isInteger(body.version)) throw new AppError('VALIDATION_FAILED', { message: 'version must be an integer' });
+  return body.version;
+};
 
 app.get('/api/state', handle(() => service.state()));
 app.get('/api/tasks', handle(() => service.listTasks()));
@@ -63,6 +68,10 @@ app.use((err, req, res, next) => {
   }
   if (err.type === 'entity.parse.failed') {
     res.status(400).json({ error: { code: 'VALIDATION_FAILED', message: 'request body must be valid JSON' }, task: null });
+    return;
+  }
+  if (err.type === 'entity.too.large') {
+    res.status(413).json({ error: { code: 'VALIDATION_FAILED', message: 'request body is too large' }, task: null });
     return;
   }
   console.error(err);

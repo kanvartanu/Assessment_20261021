@@ -289,6 +289,8 @@ Parameters planned for `config/settings.json`. All values are confirmed:
 | heartbeat.interval_s | 2 | How often `last_alive_at` is written (D12) |
 | ui.poll_interval_ms | 1000 | How often pages refresh |
 | sim.speed_multiplier | 1 | Speeds up all timers for demos and tests |
+| sim.tick_ms | 100 | Real ms between timer checks (required) |
+| server.port / db.path | 3000 / var/app.db | Required sections; `PORT` and `DB_FILE` override them |
 
 One task per contributor is a fixed rule (D35), not a setting.
 
@@ -376,7 +378,7 @@ Updated 2026-10-22. Read this first if you are picking the work up.
 | Item | Status |
 | --- | --- |
 | Phase 1, steps 1–7 (scaffold, data and state, engine, routing loop, contributor view, operator dashboard, restart) | **Done**, in `GoldRef/` |
-| Phase 2.1 automated tests | **Not started.** Put them in `TestCases/` (empty). T1–T14, U1–U12, E1–E16 and I1–I24 below are the spec |
+| Phase 2.1 automated tests | **Written, not yet run against the app.** `TestCases/` covers T1–T14, U1–U12, E1–E16, I1–I24, N1–N13, V1–V14 and X1–X14 (106 tests, `npm test`). The mutation plan (M01–M95) is in `TestCases/mutation/`. UI-only checks are in `TestCases/MANUAL.md`. The suite was written from this doc alone, without reading `GoldRef/`, and assumes the details listed under "Assumptions the test suite makes" |
 | Phase 2.2 manual walkthrough | Not started |
 | Phase 2.3 README, session map, Loom | `GoldRef/README.md` covers running, layout, API and implementation notes; the rest is not started |
 | Git | All work through this point is uncommitted on `master` |
@@ -428,7 +430,7 @@ Confirm these or change them. Each one is a single place in `src/service.js` unl
 
 ### Suggested next steps
 
-1. Write the automated suite in `TestCases/`. Use Node's built-in `node:test`, start the server per suite with `DATA_DIR`, `DB_FILE`, `PORT` and `SETTINGS_FILE` (speed ×10–×100), script the engine, and compare history event types as the test tables specify.
+1. Run the automated suite in `TestCases/` (`npm test`; see `TestCases/README.md`). Check the assumptions under "Assumptions the test suite makes" first. Then fix the app or the suite where they disagree.
 2. Run E15 (engine statistics) and E16 (deadline per priority) at a high multiplier.
 3. Walk the four brief use cases by hand in the UI, including a restart mid-routing.
 4. Write the rest of the README and commit on a branch.
@@ -463,6 +465,207 @@ These cases came up while building phase 1 and are not covered by T, U or E abov
 | I22 | Bad seed file | `contributors.json` has keyword "healthcare" | All four seed files are validated before anything is wiped. Reset returns 400 `VALIDATION_FAILED` "Seed data invalid: contributors.json entry 1 (…): unknown keyword "healthcare"", and the UI shows it with "Nothing was reset". Existing data is untouched. Broken JSON names the file. A fresh boot with a bad seed exits with the same message and creates no tables, so the next boot with a fixed file seeds normally. Verified 2026-10-22 (6 checks) |
 | I23 | Engine answers after Reset (D42) | Request pending; Reset; the answer timer would have fired | Timer cancelled or answer dropped; no event on the new T-00x that reuses the id |
 | I24 | Dashboard after restart | Browser open during downtime | Banner shows within one poll; disappears on the first successful poll; selected task and view are kept |
+
+## Test cases added with the test suite
+
+Writing the suite showed rules that this doc states but that no T, U, E or I case checks. Each one below is now a test in `TestCases/tests/n-new-cases.test.js`.
+
+| # | Case | Setup and actions | Expected | Rule it checks |
+| --- | --- | --- | --- | --- |
+| N1 | One-task index on contributors | C-02 holds an offer on T-001; insert a second active assignment for C-02 on T-002 directly into the database | Insert refused by the unique index; C-02 has 1 active assignment; T-002 has no assignee | D35 third guard (T13 only covers the per-task index) |
+| N2 | Wrong contributor declines or completes | C-03 calls Decline on C-02's offer; then, after C-02 accepts, C-03 calls Complete | 403 `NOT_YOUR_OFFER` both times, each logged as `action.rejected`; offer and work unchanged | D41 (E8 only covers Accept) |
+| N3 | Reroute now on a completed task | Task completed; operator calls Reroute now | 409 `NOT_ROUTING`; no `operator.reroute_now` | D40 (E12 only covers offered and in progress) |
+| N4 | Two operator tabs click Remove | Both send Remove with the same version | One removal, one `routing.requested(removed)`; the other tab gets 409 `STATE_CHANGED` | D13, choice 6 (E11 only covers Reroute now) |
+| N5 | Reroute now clears Overdue | High-priority task, R-1 never answers, overdue; operator clicks Reroute now | `overdue: false`; `operator.reroute_now` names R-2; current request is R-3 | Choice 3 |
+| N6 | Task JSON through its whole life | Create, offer, accept, complete | Every field in the Task format is present; ids and timestamps follow D36; `ageSeconds` and `workSeconds` count up; `workSeconds` is null while offered; `version` increases; completed task stays in `GET /api/tasks`; every event has the History event fields and a valid actor | Output formats, D16, D25, D36 |
+| N7 | Error envelope and messages | Trigger NOT_FOUND, NOT_ROUTING, NOT_YOUR_OFFER, STATE_CHANGED, REMOVED_FROM_ASSIGNMENT, ALREADY_COMPLETED, OFFER_NO_LONGER_AVAILABLE | Each returns `{ error: { code, message }, task }` with the exact message from the Errors table and the current task | Errors table |
+| N8 | Completing frees the contributor | C-02 completes T-001; T-002 then picks C-02 | C-02's work view is empty; T-002 is offered to C-02 with no `pick_unavailable` | D35 (U2 and U8 cover expiry and removal only) |
+| N9 | Busy contributors are not eligible | C-02 holds an offer; submit another python task | Its `eligibleCount` is one lower than the first task's | D35 "only free contributors are eligible" |
+| N10 | Decline vs offer expiry | Decline lands as the expiry fires | One of: (declined, requested(declined)) or (expired, action.rejected OFFER_NO_LONGER_AVAILABLE, requested(expired)); exactly one reroute | D13 (U3 covers accept vs expiry only) |
+| N11 | Missing required fields | Create without title, without keyword, without priority | 400 `VALIDATION_FAILED` naming the missing field; nothing created | E13 covers invalid values, not missing ones |
+| N12 | Stale no-match answer | R-1 answers no match after R-2 has led to an offer | `routing.stale_ignored` only; no `routing.requested(no_match)`; offer unchanged | D5 (T3, E2, E3 only cover stale contributor picks) |
+| N13 | Wrong contributor completes | C-02 is working; C-03 calls Complete | 403 `NOT_YOUR_OFFER`, logged; work unchanged | D41. Split from N2 so a missing ownership check on Decline and one on Complete fail different tests |
+
+### Assumptions the test suite makes
+
+This doc doesn't fix these details. The suite assumes the values below. If the app differs, change `TestCases/lib/routes.js` or `TestCases/lib/fixtures.js`, not the tests.
+
+| Item | Assumed |
+| --- | --- |
+| Operator actions | `POST /api/tasks/:id/reroute` and `POST /api/tasks/:id/remove`, body `{ "version": n }` (optional, choice 8) |
+| Contributor actions | `POST /api/assignments/:id/accept`, `/decline`, `/complete`, body `{ "contributorId": "C-02" }` |
+| Reset | `POST /api/reset` |
+| `config/settings.json` | The dotted names nested as objects, e.g. `{ "engine": { "min_delay_s": 5 } }`; `routing.deadline_s` is `{ "high": 25, "normal": 40, "low": 60 }` |
+| Seed files | `expertise-areas.json` is an array of strings; `contributors.json` entries are `{ name, keywords }`, with ids given in file order (C-01, C-02, …) |
+| `/api/state` | `{ tasks, contributors: [{ id, name, … }] }` |
+| Create and detail responses | The task itself, or `{ task }` |
+| SQLite | Tables `tasks`, `contributors`, `assignments`, `events`, with columns `task_id`, `contributor_id`, `status` on `assignments` |
+
+### Points in this doc the suite had to interpret
+
+- **Remove without a version (T9).** "Accept first: the removal still applies after a confirmation." The confirmation happens in the UI. Through the API, a Remove sent without `version` is assumed to apply to whatever assignment is active.
+- **Double Complete (E9).** The doc says the second call gets `STATE_CHANGED`. A second Complete arrives after the task is completed, so `ALREADY_COMPLETED` would also be reasonable. The suite follows the doc. Confirm which one is meant.
+- **U7 duration.** The test works 60 s instead of 4 min. The pause behaviour checked is the same.
+- **I19 on Windows.** A child process can't receive Ctrl+C there, so the automated I19 is skipped on Windows and listed in `TestCases/MANUAL.md`.
+- **`routing.stale_ignored` `outcome`.** The doc doesn't list its values, so the suite doesn't check them.
+- **`routing.stale_ignored` `currentRequestId` (T3).** Once the current request has led to an offer, no request is pending, so it is `null`, as in I1.
+
+## Hardening test cases
+
+These check how the app handles hostile or malformed input and request floods. The common rule: a bad request gets a 4xx JSON error, never a 500, and changes nothing. Where the doc doesn't settle a value, the expected result is a **proposal**, marked with *(P)*. Tests: `TestCases/tests/v-hardening.test.js`.
+
+| # | Case | Setup and actions | Expected |
+| --- | --- | --- | --- |
+| V1 | SQL injection in path ids | `GET /api/tasks/T-001' OR '1'='1`, `…; DROP TABLE tasks; --`, the same in the work and accept paths | 404 `NOT_FOUND` each; the task list is intact |
+| V2 | HTML and script in text fields | Title, description and disclaimers set to `<script>…</script><img onerror=…>` | Stored and returned verbatim with `content-type: application/json`. Escaping is the UI's job (manual check M-XSS) |
+| V3 | Wrong types on create | keyword `["python"]` or `"Python"`, priority `1`, title `{}`, `42` or `"   "` | 400 `VALIDATION_FAILED` naming the field *(P for case and whitespace)* |
+| V4 | Wrong types for contributorId | Accept with `["C-02"]`, `{ id }`, `2`, `true` | 400 `VALIDATION_FAILED`; offer unchanged *(P)* |
+| V5 | Malformed version | Reroute now with version `"abc"`, `1.5`, `-1`, `{}`, `[v]` | 4xx; no reroute *(P)* |
+| V6 | Prototype pollution | Create with `__proto__` and `constructor.prototype` keys | Later creates still require priority; no `polluted` field anywhere |
+| V7 | Oversized body | 2 MB title | 4xx (413 or 400); server still answers |
+| V8 | Mass assignment | Create with `id`, `status`, `version`, `createdAt`, `overdue`, `requestCount`, `currentRequestId`, `assignee` in the body | All ignored: next id, routing, fresh version, server time, requestCount 1, no assignee |
+| V9 | Non-JSON content type | Valid JSON sent as `text/plain` | 4xx; no task |
+| V10 | Malformed engine script | `answers` not an array; negative delay with unknown outcome; no taskId | 4xx; server still answers *(P)* |
+| V11 | Accept flood | 50 concurrent Accepts on one offer | Exactly one 2xx, the rest 409; one `assignment.accepted` |
+| V12 | Create flood | 30 concurrent creates | Ids T-001..T-030 with no gaps or duplicates; each task created and submitted once |
+| V13 | Encoded path traversal | `/api/tasks/..%2F..%2Fpackage.json` and variants | 404; no file contents in the body |
+| V14 | No hidden delete | `DELETE /api/tasks/:id` | 4xx; the task is still there (D25) |
+
+## Feature combination test cases
+
+Each case combines two features that the T, U, E, I and N cases only test apart. Tests: `TestCases/tests/x-combinations.test.js` (X2, X8 and X14 are in `restart.test.js`).
+
+| # | Combination | Setup and actions | Expected |
+| --- | --- | --- | --- |
+| X1 | Remove + reroute pause | Decline, then Remove during the 5 s pause | 409 `STATE_CHANGED`; the pause still sends exactly one request |
+| X2 | Restart + accept | Offer has 20 s left; server down 60 s; Accept right after restart | Accepted; no expiry |
+| X3 | Reset + reroute pause | Decline, then Reset during the pause; create a new T-001 | The old pause never fires: new T-001 history is only created, requested(submit) |
+| X4 | Reset + old assignment id | Offer A-001; Reset; Accept A-001 | 404 `NOT_FOUND` |
+| X5 | Remove + picked again | C-02 removed from an offer; the reroute offers C-02 again | Old assignment: 409 `OFFER_NO_LONGER_AVAILABLE`; new one accepts normally |
+| X6 | Complete + pick race | T-002's answer naming C-02 lands as C-02 completes T-001 | T-002 offered to C-02, or pick_unavailable naming T-001; C-02 never on two tasks |
+| X7 | Overdue + offer + decline | High priority, R-1 never, R-2 offers C-02, C-02 declines | New round: `overdue` false, `routingElapsedSeconds` restarts |
+| X8 | Restart + complete | 20 s of work, server down 60 s, Complete | `assignment.completed` workSeconds ≈ 20, not 80 |
+| X9 | Remove + expiry race | Remove lands as the offer expires | One of: (removed, requested(removed)) or (expired, action.rejected STATE_CHANGED, requested(expired)); one reroute |
+| X10 | Offer + contributor view | Offer to C-02; open C-02's work view | Shows title, keyword, priority, description, disclaimers, estimated effort (D24) |
+| X11 | Expiry + D31 start-over | Two python holders: C-02 lets the offer expire, C-03 declines | Reasons submit, expired, declined; eligibleCount 2, 1, 2 |
+| X12 | Expiry + next task | C-02's offer expires; a new task picks C-02 | Offered at once; no pick_unavailable |
+| X13 | Stale version + not routing | Reroute now with an old version on an offered task | 409 `NOT_ROUTING` (checked before the version, choice 9) |
+| X14 | Restart + routing clock | Low priority task routing for 10 s; server down 30 s | `routingElapsedSeconds` after restart ≈ before (choice 13) |
+
+## Mutation testing
+
+Mutation testing checks the tests, not the app. Each mutation below is one deliberate bug. The suite passes if every mutation makes at least one test fail ("killed"). The kill sets are also designed so that **no two mutations fail the same set of tests**. A failing run then points to the one mutation that would explain it.
+
+The mutations describe behaviour and name a file from the code map, not a line. The suite was written without reading `GoldRef/`, so whoever applies them puts each one in the matching place in the code.
+
+**Plan status.** 95 mutations, 95 distinct predicted kill sets. 51 of them are each killed by a single test that no other mutation kills. Every T, U, E, I, N, V and X test kills at least one mutation, except the race tests (T9, T10, U3, N10, X6, X9). Their outcome changes from run to run, so they are listed under "May also fail" and kept out of the distinct-set rule. `node mutation/check.js` recomputes all of this from `TestCases/mutation/mutations.json`, which is the source of the table below.
+
+**Running it**
+
+1. Run `node mutation/run.js --id baseline --app ../GoldRef`. Every test must pass first.
+2. For each mutation, copy the app to a scratch folder, make that one change, and run `node mutation/run.js --id M07 --app <copy>`.
+3. Run `node mutation/check.js --observed`. It reports survivors, kills that differ from the prediction, and any two mutations with the same observed kill set.
+4. A survivor means a missing test. Two mutations with the same kill set mean a missing discriminating test. Add it, then update `mutations.json` and regenerate this table with `node mutation/check.js --markdown`.
+
+The "Killed by" column is a prediction made from the spec. Step 3 replaces it with what actually happened.
+
+| # | File | Mutation | Killed by | May also fail (races) |
+| --- | --- | --- | --- | --- |
+| M01 | `src/engine.js` | Random answer delay starts at 0 s instead of engine.min_delay_s | E15 |  |
+| M02 | `src/engine.js` | engine.never_return_rate ignored: every unscripted request answers | E15, T11 |  |
+| M03 | `src/engine.js` | A task's script replays its first answer for every request instead of one answer per request | T2, T3, T5, U6, U10, U11, U12, E1, E2, I1, I10, I11, N12, X5, X7, X11 |  |
+| M04 | `src/service.js` | Stale check removed: an answer is applied whatever its request id (D5) | T3, T4, U4, U9, E2, E3, I1, N12 |  |
+| M05 | `src/service.js` | High-priority deadline uses the normal value (40 s instead of 25 s) | T2, T3, T11, I1, I3, E2, E3, E16, N12 |  |
+| M06 | `src/service.js` | Low-priority deadline uses 40 s instead of 60 s | U4, E16 |  |
+| M07 | `src/service.js` | Normal-priority deadline uses 60 s instead of 40 s | E16 |  |
+| M08 | `src/service.js` | routing.reroute_delay_s ignored: every reroute is sent at once | T5, T7, T14, U2, U6, U8, I1, I2, E4 |  |
+| M09 | `src/service.js` | No 5 s pause after no match or pick_unavailable (other reasons keep it) | T7, T14, U6, I1 |  |
+| M10 | `src/service.js` | No 5 s pause after removal (other reasons keep it) | U8 |  |
+| M11 | `src/service.js` | No 5 s pause after expiry (other reasons keep it) | U2 |  |
+| M12 | `src/service.js` | No 5 s pause after decline (other reasons keep it) | T5, I2, E4 |  |
+| M13 | `src/service.js` | Reroute now during a pause does not cancel the pending pause, so a second request follows | I2 |  |
+| M14 | `src/service.js` | routing.overdue is not logged (flag and retry still happen) | T2, T3, T11, U4, I1, I3, E2, E3, E5, E16, N12 |  |
+| M15 | `src/service.js` | Overdue flag not cleared when an offer is made | T2 |  |
+| M16 | `src/service.js` | Overdue flag not cleared by Reroute now | N5 |  |
+| M17 | `src/service.js` | Overdue flag not cleared on restart | E5 |  |
+| M18 | `src/service.js` | Overdue flag cleared by the automatic retry (choice 3 inverted) | E5, N5, I3 |  |
+| M19 | `src/service.js` | routingElapsedSeconds restarts at each automatic retry (choice 4) | I3 |  |
+| M20 | `src/service.js` | Routing round start not reset when a decline starts a new round | X7 |  |
+| M21 | `src/service.js` | requestCount not incremented after the first request | T2, U9 |  |
+| M22 | `src/service.js` | Declined contributors are not excluded from the next pick (D31) | T5, E1, I10, I11, X11 |  |
+| M23 | `src/service.js` | Contributors whose offer expired are not excluded from the next pick | U2, X11 |  |
+| M24 | `src/service.js` | D31 start-over never happens: exclusions are permanent | E1, I11, X11 |  |
+| M25 | `src/service.js` | Start-over when every free holder has declined, ignoring busy ones (choice 5) | I10 |  |
+| M26 | `src/service.js` | A removed contributor is excluded from the next pick (choice 5) | I6 |  |
+| M27 | `src/service.js` | Busy contributors are counted in eligibleCount (D35) | N9, U6, U12, I10 |  |
+| M28 | `src/service.js` | Keyword ignored: every contributor is eligible for every task (D7) | T7, U6, I10, E1, I11, X11 |  |
+| M29 | `src/service.js` | pick_unavailable check removed: the busy pick goes straight to an offer, which the index then refuses | T14, U5, U12, I1 |  |
+| M30 | `src/db.js` | Unique partial index on assignments(task_id) dropped | T13 |  |
+| M31 | `src/db.js` | Unique partial index on assignments(contributor_id) dropped | N1 |  |
+| M32 | `src/service.js` | The client's version on Reroute now and Remove is ignored (choice 8) | E11, I5 |  |
+| M33 | `src/service.js` | Accept does not require the assignment to be offered | E9, I9, N7, X5, V11 |  |
+| M34 | `src/service.js` | Decline does not require the assignment to be offered | I8 |  |
+| M35 | `src/service.js` | Actions skip the timer catch-up (choice 10) | I9 |  |
+| M36 | `src/service.js` | Accept does not check the contributor owns the offer | E8, N7 |  |
+| M37 | `src/service.js` | Decline does not check the contributor owns the offer | N2 |  |
+| M38 | `src/service.js` | Complete does not check the contributor owns the assignment | N13 |  |
+| M39 | `src/service.js` | Complete allowed on an offered (not yet accepted) assignment | I7, N7 |  |
+| M40 | `src/service.js` | Complete after removal returns STATE_CHANGED instead of REMOVED_FROM_ASSIGNMENT | U8, N7 | T10 |
+| M41 | `src/service.js` | Remove checks the assignee before ALREADY_COMPLETED, so a completed task returns STATE_CHANGED (choice 9) | E10, N7 | T10 |
+| M42 | `src/service.js` | NOT_ROUTING check removed from Reroute now (D40) | E12, N3, N7, X13 |  |
+| M43 | `src/service.js` | Reroute now checks the version before NOT_ROUTING (choice 9) | X13 |  |
+| M44 | `src/service.js` | operator.reroute_now is not logged | T4, U9, I2, E11, N5 |  |
+| M45 | `src/service.js` | Reroute after removal logged with reason declined instead of removed | T8, U8, I6, N4 | T9, T10 |
+| M46 | `src/service.js` | assignment.removed always reports wasStatus offered | T8, U8, I5 |  |
+| M47 | `src/service.js` | Remove on a task with no assignee returns 200 and does nothing (choice 6) | I4, X1 | X9 |
+| M48 | `src/service.js` | Rejected actions are not logged as action.rejected (choice 7) | E8, E10, I4, I9, N2, N13 | T9, T10, U3, N10, X9 |
+| M49 | `src/service.js` | A second Accept on an accepted assignment returns 200 without changing anything | E9, V11 |  |
+| M50 | `src/service.js` | current_assignment_id not cleared on completion | N8, U6 | X6 |
+| M51 | `src/service.js` | current_assignment_id not cleared on removal | U8, I6, N7, X5 |  |
+| M52 | `src/service.js` | current_assignment_id not cleared on expiry | U2, X11, X12 |  |
+| M53 | `src/service.js` | current_assignment_id not cleared on decline | U12, E1, I11, X11 |  |
+| M54 | `src/service.js` | Restart does not push offer expiry by the downtime | T12, E6, E7, X2 |  |
+| M55 | `src/service.js` | Work clock ignores paused_ms everywhere (keeps running through downtime, D39) | U7, X8 |  |
+| M56 | `src/service.js` | assignment.completed workSeconds ignores paused_ms (the live clock still pauses) | X8 |  |
+| M57 | `src/service.js` | Restart does not push next_routing_at by the downtime | E4 |  |
+| M58 | `src/service.js` | Requests in flight are not re-sent on restart (no lost_on_restart, no restart request) | T11, E5 |  |
+| M59 | `src/service.js` | Restart does not push the routing round start by the downtime | X14 |  |
+| M60 | `src/service.js` | First boot is treated as a restart | I17 |  |
+| M61 | `src/service.js` | Completed tasks also get server.restarted | I18 |  |
+| M62 | `src/server.js` | No final heartbeat on Ctrl+C (I19 is skipped on Windows; run this one on Linux or macOS) | I19 |  |
+| M63 | `src/service.js` | Keyword not validated against data/expertise-areas.json | E13, I15, V3 |  |
+| M64 | `src/service.js` | Validation checks keyword before title | I15 |  |
+| M65 | `src/server.js` | Malformed JSON body returns 500 instead of VALIDATION_FAILED | I13 |  |
+| M66 | `src/service.js` | A missing contributorId is treated as another contributor (403) instead of 400 | I12 |  |
+| M67 | `src/service.js` | Validation rejects empty strings but not missing fields | N11 |  |
+| M68 | `src/service.js` | Field types not checked (arrays, numbers, objects, case, whitespace-only titles accepted) | V3 |  |
+| M69 | `src/service.js` | contributorId compared loosely (String(x) or ==), so ["C-02"] matches C-02 | V4 |  |
+| M70 | `src/server.js` | NOT_FOUND not mapped: unknown ids return 500 | I14, N7, V1, V13, X4 |  |
+| M71 | `src/service.js` | Task lookup builds SQL by string concatenation | V1 |  |
+| M72 | `src/service.js` | Create copies every body field onto the task (mass assignment) | V8 |  |
+| M73 | `src/service.js` | Create merges the body into a shared defaults object by key (prototype pollution) | V6 |  |
+| M74 | `src/server.js` | JSON body size limit removed | V7 |  |
+| M75 | `src/server.js` | Body parsed as JSON whatever the content type | V9 |  |
+| M76 | `src/engine.js` | Sim script input not validated | V10 |  |
+| M77 | `src/service.js` | Task id allocated before an await, outside the insert transaction | V12 |  |
+| M78 | `src/server.js` | Static files served from the app root instead of public/ | V13 |  |
+| M79 | `src/server.js` | DELETE /api/tasks/:id route that deletes the task | V14 |  |
+| M80 | `src/service.js` | Contributor work view returns any active assignment, not only the caller's (C5) | I20 |  |
+| M81 | `src/service.js` | Contributor work view omits disclaimers and estimatedEffort (D24) | X10 |  |
+| M82 | `src/service.js` | Task history returned newest first | T1, T2, T3, T4, T5, T6, T8, T11, T12, T14, U1, U4, U5, U6, U10, U11, U12, E2, E3, E5, I1, I2, I23, N12, X3 |  |
+| M83 | `src/db.js` | Append-only triggers on events dropped | I16 |  |
+| M84 | `src/config.js` | Seed files validated after the database is wiped | I22 |  |
+| M85 | `src/engine.js` | Reset does not cancel pending engine timers, and late answers are matched by request id only | I23 |  |
+| M86 | `src/service.js` | Reset does not cancel pending reroute pauses | X3 |  |
+| M87 | `src/service.js` | Reset keeps the assignments table | X4 |  |
+| M88 | `src/service.js` | A new assignment for a task reuses the task's previous assignment id | U10, X5 |  |
+| M89 | `src/service.js` | ageSeconds reported in real seconds, not simulated | N6 |  |
+| M90 | `src/service.js` | latencySeconds reported in real seconds, not simulated | T1, I21, E15 |  |
+| M91 | `src/service.js` | offerExpiresInSeconds reported in real seconds, not simulated | T12, U1, I21, E7 |  |
+| M92 | `src/clock.js` | Speed multiplier not applied to offer expiry (120 real seconds) | T6, T12, U1, U2, U10, I8, I9, I21, E7, X11, X12 |  |
+| M93 | `src/service.js` | HTML stripped or escaped in text fields on the server | V2 |  |
+| M94 | `src/service.js` | Version coerced with Number() or parseInt, so "abc", 1.5 or [v] are accepted | V5 |  |
+| M95 | `src/service.js` | Reset reloads tasks but leaves each contributor's current_assignment_id set | E14 |  |
 
 ## Future work
 

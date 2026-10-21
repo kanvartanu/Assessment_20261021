@@ -1,0 +1,14 @@
+{
+  "name": "task-routing-tests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Black-box test suite for the task routing app, written from requirements-and-decisions.md",
+  "scripts": {
+    "test": "node --test --test-concurrency=1 \"tests/*.test.js\"",
+    "test:fast": "node --test --test-concurrency=1 --test-skip-pattern=E15 \"tests/*.test.js\"",
+    "test:stats": "node --test \"tests/e15-engine-stats.test.js\""
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}

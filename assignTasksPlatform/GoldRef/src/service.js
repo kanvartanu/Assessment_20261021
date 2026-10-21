@@ -554,6 +554,13 @@ function createService({ db, settings, clock, engine, loadData }) {
     if (typeof taskId !== 'string' || !Array.isArray(answers)) {
       throw new AppError('VALIDATION_FAILED', { message: 'taskId and answers are required' });
     }
+    for (const [i, a] of answers.entries()) {
+      const known = a && (['never', 'no_match', 'random'].includes(a.outcome) || getContributor(a.outcome));
+      if (!known) throw new AppError('VALIDATION_FAILED', { message: `answers[${i}].outcome must be never, no_match, random or a contributor id` });
+      if (a.after_s != null && !(typeof a.after_s === 'number' && a.after_s >= 0)) {
+        throw new AppError('VALIDATION_FAILED', { message: `answers[${i}].after_s must be a number of seconds, 0 or more` });
+      }
+    }
     engine.script(taskId, answers);
     return { taskId, answers };
   }
