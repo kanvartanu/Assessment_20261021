@@ -1,8 +1,9 @@
-Assumptions
+Assumptions taken in current task
 AI
 - After 30 second and 60 second, flag the task and allow button to manually reroute it.
 - engine accepts contributor randomly based on matching ids with the task.
 - 5 s pause after every reroute to allow infinite looping
+- If a seed file is invalid, Boot or Reset fails, but the database has already been wiped. The tables are left empty, and the next boot doesn't reseed. Checking the seed files before wiping would fix it.
 Mine
 - 2 expert areas python and c
 - contributor and task both have common id, python or c
@@ -24,8 +25,9 @@ Corrections to ai
 - what all info gaoes in a task
 - I agree with resuming timers. on engine restart
 - trying to simplifying the task like removing what all operator can do during intervention on a task
+- keep info in phases and not implement all now
 
-Tests
+Edge case Tests from me
 - contributor assigned by engine, update on operator dashboard
 - contributor not open task and it expires
 - hat if contributor
@@ -44,6 +46,29 @@ Tests
 How I used AI
 - Session 1 - write design doc and tests in the design doc. write assumptions and flow and flowchart of the program and possible test cases
 - Session 2 - write gold ref
-- Session 3 - write validation test cases (because session 2 might hard code somethings to pass in test cases with its gold ref)
-- Session 4 - run validation test cases on gold and see what are gaps and reason for gaps and fill those gaps in appropriate areas
-- Session 5 - do session 4 again until the threshold of errors is reduced below 10%.
+- Session 3 - verify the gold ref against the document based on code quality (rubrics 1 - not scalable and poor indentation and poor readability, 2 - scalable to some level but hard codings and readable code, 3 - scalable 50% and readable code, 4 - highly scalable and excellent readability),  and doc coverage (rubric, 1 - missed 100% scenarios, 2 - miseed 70% scenarios, 3 - missed 50% scenarios, 4 - missed 25% scenarios, 5 - dinot miss any scenario)
+- Session 4 - write validation test cases (because session 2 might hard code somethings to pass in test cases with its gold ref). ask session to check for additional edge cases and feature combination test cases to check vulnerability of code. add mutation testing scenarios in doc such that all mutations fail all test cases. and no 2 mutations should fail same tests as much as possible.
+- Session 5(due to time crunch could not run this session) - rate the test cases coverage from the doc and rate it on rubric, 1 - missed 100% scenarios, 2 - miseed 70% scenarios, 3 - missed 50% scenarios, 4 - missed 25% scenarios, 5 - dinot miss any scenario)
+- Session 6 - run validation test cases on gold and see what are gaps and reason for gaps and fill those gaps in appropriate areas. do mutation testing from doc and update tests accordingly. report the number of test cases failing before your fix and number of failing after your fix. number of test cases changed after mutation. number of redundant test cases. any code changes to number of lines changed and number of files changed
+- There should be other sessions as well but due to crunch in time, leaving it here
+
+Results of sessions
+Session 1 - missed some pointers and asked some assumptions to be clarified
+Session 2 - coded and installed dependencies and packages and resolved errors it faced in the environment other than its code errors. the AI found a gap in the doc and resolved it with an assumption.
+Session 3 - scalability 3/4
+Why it isn't a 4 (scalability)
+- Polling cost grows with every task ever created. The UI calls /api/state every second. That returns all tasks with no paging, and each task costs two extra queries (assigneeJson, service.js:435). Completed tasks are kept forever (D25), so the list only grows.
+- The ticker scans tables every 100 ms (service.js:183). There are no indexes on tasks(status) or assignments(status, offer_expires_at) to make those scans cheap.
+- Every routing request loads every contributor and parses their keywords in JavaScript (eligibleFor, service.js:68). Keywords are stored as JSON text, not in a join table.
+- service.js does everything in 568 lines: routing, timers, restart recovery, seeding, validation, actions and read models.
+- Transaction state is shared by the whole module (db.js:109-110), so the code assumes one database per process.
+- Some values are written out by hand in several places. The priority list appears in service.js:4 and again in the database schema (db.js:13). Status names like 'offered' and 'accepted' are typed directly into many queries.
+All of this is acceptable under D14, which asks for a simple stack. It just isn't "highly scalable".
+code coverage from doc - 5/5
+Session 4 - Added 12 new test cases to doc and directory. did not enter goldref code. wrote test cases only using the doc
+Added extra test cases and mutatioms and scenarios in doc and in test folder
+Session 6 - all 105 failed. checking environment.
+The missing server.port, db.path, and sim.tick_ms entries trace back to the doc's incomplete settings table, which caused the fixture copy to miss them and config.js to crash on the PORT override.
+Had to leave mutation testing due to crunch in time. left out test cases that took time.
+The subset took 38 s: 84 pass and 5 fail. Looking at the 5 failures.
+89 pass, 0 fail, and I19 is skipped on Windows. Last step: record the two doc gaps in the doc, then count the changes.
