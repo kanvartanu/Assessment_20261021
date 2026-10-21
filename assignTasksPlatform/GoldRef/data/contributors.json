@@ -1,0 +1,7 @@
+[
+  { "id": "C-01", "name": "Arjun Mehta", "keywords": ["finance", "python"] },
+  { "id": "C-02", "name": "Priya Shah", "keywords": ["finance"] },
+  { "id": "C-03", "name": "Daniel Okafor", "keywords": ["python"] },
+  { "id": "C-04", "name": "Mei Lin", "keywords": ["finance"] },
+  { "id": "C-05", "name": "Sofia Romero", "keywords": ["python"] }
+]

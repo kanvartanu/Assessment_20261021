@@ -1,0 +1,10 @@
+[
+  {
+    "taskId": "T-002",
+    "description": "Unresolved demo: the first request never returns; the retry answers after 6 s with a random eligible contributor.",
+    "engine": [
+      { "outcome": "never" },
+      { "after_s": 6, "outcome": "random" }
+    ]
+  }
+]

@@ -1,0 +1,26 @@
+[
+  {
+    "title": "Reconcile Q3 vendor invoices",
+    "description": "Match 240 vendor invoices against the purchase ledger and flag mismatches over $50.",
+    "keyword": "finance",
+    "priority": "normal",
+    "disclaimers": "Contains supplier bank details. Do not copy outside the workspace.",
+    "estimatedEffort": "3 hours"
+  },
+  {
+    "title": "Clean the claims dataset",
+    "description": "Deduplicate claim rows, normalise date formats and write a short summary of what was removed.",
+    "keyword": "python",
+    "priority": "high",
+    "disclaimers": "Contains anonymised patient data.",
+    "estimatedEffort": "2 hours"
+  },
+  {
+    "title": "Review the expense policy model",
+    "description": "Check the spreadsheet model that estimates travel spend under the new policy.",
+    "keyword": "finance",
+    "priority": "low",
+    "disclaimers": "",
+    "estimatedEffort": "1 hour"
+  }
+]

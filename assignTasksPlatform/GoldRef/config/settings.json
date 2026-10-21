@@ -1,0 +1,13 @@
+{
+  "server": { "port": 3000 },
+  "db": { "path": "var/app.db" },
+  "engine": { "min_delay_s": 5, "max_delay_s": 20, "never_return_rate": 0.2 },
+  "routing": {
+    "deadline_s": { "high": 25, "normal": 40, "low": 60 },
+    "reroute_delay_s": 5
+  },
+  "offer": { "expiry_s": 120 },
+  "heartbeat": { "interval_s": 2 },
+  "ui": { "poll_interval_ms": 1000 },
+  "sim": { "speed_multiplier": 1, "tick_ms": 100 }
+}

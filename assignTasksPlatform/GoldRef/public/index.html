@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Task Routing</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Task Routing</h1>
+    <label class="viewing">
+      Viewing as
+      <select id="view-select">
+        <option value="operator">Operator</option>
+      </select>
+    </label>
+    <button id="reset-btn" class="secondary">Reset</button>
+  </header>
+
+  <div id="offline-banner" class="banner" hidden>
+    Server unreachable. Timers are paused and will resume when the connection returns.
+  </div>
+
+  <main id="operator-view">
+    <section class="card">
+      <h2>New task</h2>
+      <form id="create-form" class="create-form">
+        <label>Title <input name="title" required></label>
+        <label>Keyword <select name="keyword" id="keyword-select"></select></label>
+        <label>Priority
+          <select name="priority">
+            <option value="normal">normal</option>
+            <option value="high">high</option>
+            <option value="low">low</option>
+          </select>
+        </label>
+        <label>Estimated effort <input name="estimatedEffort" placeholder="e.g. 2 hours"></label>
+        <label class="wide">Description <textarea name="description" rows="2"></textarea></label>
+        <label class="wide">Disclaimers <textarea name="disclaimers" rows="2"></textarea></label>
+        <div class="wide form-actions">
+          <button type="submit">Create and route</button>
+          <span id="create-message" class="message"></span>
+        </div>
+      </form>
+    </section>
+
+    <div class="layout">
+      <section class="card tasks-card">
+        <h2>Tasks</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th><th>Title</th><th>Keyword</th><th>Priority</th>
+                <th>State</th><th>Age</th><th>Routing</th><th>Assignee</th>
+              </tr>
+            </thead>
+            <tbody id="task-rows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <aside class="side">
+        <section class="card" id="detail-panel">
+          <p class="muted">Select a task to see its history and actions.</p>
+        </section>
+        <section class="card">
+          <h2>Contributors</h2>
+          <ul id="contributor-list" class="contributors"></ul>
+        </section>
+      </aside>
+    </div>
+  </main>
+
+  <main id="contributor-view" hidden>
+    <section class="card contributor-card" id="contributor-panel"></section>
+    <section class="card">
+      <h2>Your recent assignments</h2>
+      <ul id="recent-list" class="recent"></ul>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

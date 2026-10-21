@@ -367,6 +367,103 @@ Phase 1 builds the smallest product that covers all four use cases in the brief.
 2. Walk through the four use cases by hand, including a restart mid-routing.
 3. README with decisions, assumptions and omissions; session map; Loom walkthrough.
 
+## Implementation status and handover
+
+Updated 2026-10-22. Read this first if you are picking the work up.
+
+### Where things stand
+
+| Item | Status |
+| --- | --- |
+| Phase 1, steps 1–7 (scaffold, data and state, engine, routing loop, contributor view, operator dashboard, restart) | **Done**, in `GoldRef/` |
+| Phase 2.1 automated tests | **Not started.** Put them in `TestCases/` (empty). T1–T14, U1–U12, E1–E16 and I1–I24 below are the spec |
+| Phase 2.2 manual walkthrough | Not started |
+| Phase 2.3 README, session map, Loom | `GoldRef/README.md` covers running, layout, API and implementation notes; the rest is not started |
+| Git | All work through this point is uncommitted on `master` |
+
+Verified: every JS file passes `node --check`. The server boots, seeds and routes live, and recovers after a restart. A throwaway smoke script (not part of the repo) ran 26 checks at speed ×10, all passing. They covered T1, T2, T3, T4, T5, T8, T11, T12, T13, U8, E8, E9, E10, E11, E12 and E13. I22 (bad seed files) was fixed and verified separately, and the 26 checks still pass after the fix. The remaining cases have not been run.
+
+### How to run
+
+1. Node **22.13 or newer** is required (the code uses the built-in `node:sqlite`). Node 24.20 LTS was installed on the dev machine with `winget install OpenJS.NodeJS.LTS`. Open a new terminal afterwards so PATH picks it up.
+2. `cd GoldRef`, `npm install`, `npm start`, then open http://localhost:3000.
+3. **Reset** in the top bar reloads the seed files. Deleting `GoldRef/var/` gives a completely fresh first boot.
+4. Environment overrides for tests: `PORT`, `DB_FILE`, `SETTINGS_FILE` (a settings JSON) and `DATA_DIR` (a folder with the four seed files). For deterministic tests, point `DATA_DIR` at a folder with `tasks.json` = `[]` and `scenarios.json` = `[]`. Otherwise the seed tasks take contributors at random and scripted picks turn into `routing.pick_unavailable`. This happened in the first smoke run.
+5. To script the engine: `POST /api/sim/script { taskId, answers: [{ after_s, outcome }] }`, where `outcome` is `never`, `no_match`, `random` or a contributor id. Answers are used one per request, in order; after that the engine is random. Script a task **before** creating it, because the first request goes out on creation. Task ids are predictable (T-001, T-002, … in creation order).
+6. To simulate a restart, kill the process. On Windows that is a hard kill, so the downtime counts from the last heartbeat (up to 2 s, simulated). Ctrl+C writes a final heartbeat first.
+7. When starting the server from an agent or script, run `node src/server.js` directly rather than `npm start`. Killing the `npm` wrapper on Windows leaves the child `node` process holding port 3000, and the next start fails with `EADDRINUSE`.
+
+### Code map
+
+| File | Responsibility |
+| --- | --- |
+| `src/server.js` | Express routes, error-to-JSON mapping, 100 ms ticker, shutdown heartbeat |
+| `src/service.js` | All business logic: routing loop, compare-and-set `updateTask`, offers, contributor and operator actions, timers (`tick`), restart recovery, seeding, read models |
+| `src/db.js` | Schema, unique partial indexes, append-only triggers, re-entrant `transaction` with `afterCommit` hooks |
+| `src/engine.js` | Simulated engine, scripting, in-memory timers |
+| `src/clock.js` | Simulated seconds ↔ real ms via `sim.speed_multiplier` |
+| `src/errors.js` | Error codes and UI messages from the Errors table |
+| `src/config.js` | Loads settings and seed files, applies env overrides |
+| `public/` | One page: operator dashboard and the "viewing as" contributor view (vanilla JS, polls `/api/state`) |
+
+### Implementation choices this doc did not fix
+
+Confirm these or change them. Each one is a single place in `src/service.js` unless noted.
+
+1. **Stored times are real epoch ms**. Every configured duration is in simulated seconds and is divided by the speed multiplier. API durations (`ageSeconds`, `latencySeconds`, countdowns) are in simulated seconds.
+2. **Assignment statuses holding the lock are `offered` and `accepted`.** Section 6 mentions `in_progress`, but that is a task status, not an assignment status.
+3. **The Overdue flag stays on across the automatic retry.** It matches the sample task JSON (`overdue: true` with `R-003-2`). It clears on an offer, a no match, a reroute pause, Reroute now and a restart. If the retry also misses its deadline, a second `routing.overdue` is logged.
+4. **`routingElapsedSeconds` counts from the start of the current routing round**, not from the current request. Retries don't reset it, and the Overdue badge shows it.
+5. **D31 start-over** happens only when *every* contributor with the keyword (free or busy) has declined or let an offer expire on this task. If one is busy and the rest declined, nobody is eligible, and the task keeps hitting no match until the busy one is free. **A removed contributor is not excluded** from the next pick.
+6. **Remove contributor on a task with no active assignment** returns 409 `STATE_CHANGED`. The doc has no dedicated code for it.
+7. **Rejected actions always log `action.rejected`**, including double clicks (E9) and stale versions.
+8. **`version` is optional** on Reroute now and Remove. When it is sent and is stale, the action returns `STATE_CHANGED`. The UI always sends it. When Remove fails this way and the task still has an assignee, the UI asks for confirmation again using the fresh state ("the removal still applies after a confirmation").
+9. **Check order:** Reroute now checks `NOT_ROUTING` before the version. Remove checks `ALREADY_COMPLETED`, then the version, then whether there is an assignee.
+10. **Every action first runs the timer catch-up.** So an Accept that arrives after `offer_expires_at`, before the ticker has fired, sees the offer already expired.
+11. **Engine requests are sent only after their transaction commits**, so a rolled-back write never leaves a live request behind.
+12. **Seed tasks are created by `system`** and submitted straight away. `data/scenarios.json` scripts T-002 (first request never answers, the retry answers after 6 s) to demo the unresolved case.
+13. **Restart:** every non-completed task gets a `server.restarted` event. Offer expiry, the work clock (`paused_ms` column), the routing round start and the reroute pause (`next_routing_at`) are all pushed later by the downtime. Extra columns beyond section 4: `tasks.seq`, `estimated_effort`, `next_routing_reason`, `exclusion_floor`; `assignments.seq`, `paused_ms`.
+14. **The `/api/state` endpoint** returns tasks, contributors and UI config in one call for polling. `GET /api/contributors/:id/work` is the contributor's own view (C5). `POST /api/sim/script` is the test hook. Event display lines are built in the browser (`public/app.js`, `describe`).
+15. **`data/scenarios.json` scripts only the engine.** Scripted contributor behaviour ("contributor Y declines") is not implemented. Tests do that through the API.
+
+### Suggested next steps
+
+1. Write the automated suite in `TestCases/`. Use Node's built-in `node:test`, start the server per suite with `DATA_DIR`, `DB_FILE`, `PORT` and `SETTINGS_FILE` (speed ×10–×100), script the engine, and compare history event types as the test tables specify.
+2. Run E15 (engine statistics) and E16 (deadline per priority) at a high multiplier.
+3. Walk the four brief use cases by hand in the UI, including a restart mid-routing.
+4. Write the rest of the README and commit on a branch.
+
+## Additional test cases from implementation
+
+These cases came up while building phase 1 and are not covered by T, U or E above. Each one checks one of the implementation choices in the previous section, so if a choice changes, the test should change with it.
+
+| # | Case | Setup and actions | Expected |
+| --- | --- | --- | --- |
+| I1 | Stale answer lands during the 5 s reroute pause | R-2 answers and leads to a pick_unavailable; R-1 (stale) answers during the pause | `routing.stale_ignored` with `currentRequestId: null`; the pause and the next request are unaffected (seen in the first smoke run) |
+| I2 | Reroute now during the 5 s pause | Decline, then the operator clicks Reroute now before the pause ends | `operator.reroute_now` with `requestId: null`, then `routing.requested(operator_reroute)` at once; the pending pause doesn't send a second request |
+| I3 | Retry also overdue | High priority; R-1 and R-2 never answer | Two `routing.overdue` events (25 s, 50 s), `routing.requested(retry_deadline)` twice; `overdue` stays true; `routingElapsedSeconds` keeps counting from R-1 |
+| I4 | Remove contributor on a routing task | Task routing, no assignee; call Remove | 409 `STATE_CHANGED`; `action.rejected` logged; task unchanged |
+| I5 | Remove with stale version after accept | Operator loads the offered task (version v); contributor accepts; operator sends Remove with v | 409 `STATE_CHANGED` with the fresh task; a second Remove with the new version succeeds with `wasStatus: in_progress` |
+| I6 | Remove an offer (not yet accepted) | Offered to C-02; operator removes | `assignment.removed` with `wasStatus: offered`; C-02 free; C-02 **not** excluded from the next pick (choice 5) |
+| I7 | Complete before accept | Offer to C-02; C-02 calls Complete | 409 `STATE_CHANGED`; offer unchanged |
+| I8 | Decline after expiry | Offer expires; C-02 then calls Decline | 409 `OFFER_NO_LONGER_AVAILABLE`; no second reroute |
+| I9 | Accept after the deadline but before the ticker fires | Accept arrives a few ms after `offer_expires_at` | Catch-up runs first: `assignment.expired`, then `action.rejected OFFER_NO_LONGER_AVAILABLE`; never accepted |
+| I10 | D31 start-over with a busy contributor | Python holders C-03 and C-05. C-05 declines; C-03 is busy elsewhere | Next request has `eligibleCount: 0` and ends in no match; no start-over until C-03 is free or has also declined |
+| I11 | D31 start-over | Both python holders decline in turn | Third `routing.requested` has `eligibleCount: 2` (E1) and later declines are excluded again |
+| I12 | Missing contributorId | Accept with an empty body | 400 `VALIDATION_FAILED` "contributorId is required"; no event |
+| I13 | Malformed JSON | POST /api/tasks with an invalid JSON body | 400 `VALIDATION_FAILED` "request body must be valid JSON" |
+| I14 | Unknown ids | GET /api/tasks/T-999; Accept on A-999; GET /api/contributors/C-99/work | 404 `NOT_FOUND` each; no events |
+| I15 | Validation order | Empty title and an invalid keyword together | Message names `title` (title, keyword, priority are checked in that order) |
+| I16 | Event log is append-only | `UPDATE events ...` or `DELETE FROM events ...` directly in SQLite | Refused by trigger ("events are append-only"); Reset still works |
+| I17 | First boot is not a restart | Delete `var/`, start | No `server.restarted` events |
+| I18 | Completed tasks on restart | One completed task and one routing task; restart | `server.restarted` only on the routing task; completed history unchanged |
+| I19 | Clean shutdown heartbeat | Ctrl+C, wait 30 s, start | `downtimeSeconds` ≈ 30 (not 30 + up to 2) |
+| I20 | Contributor sees only their own work | C-02 has an offer; GET work for C-03 | C-03's response has `task: null`; nothing about C-02's offer |
+| I21 | Speed multiplier is applied everywhere | Speed ×10; engine answers after 8 s (simulated) | Real wait ≈ 0.8 s; `latencySeconds: 8`; offer countdown starts at 120 and drops ~10 per real second |
+| I22 | Bad seed file | `contributors.json` has keyword "healthcare" | All four seed files are validated before anything is wiped. Reset returns 400 `VALIDATION_FAILED` "Seed data invalid: contributors.json entry 1 (…): unknown keyword "healthcare"", and the UI shows it with "Nothing was reset". Existing data is untouched. Broken JSON names the file. A fresh boot with a bad seed exits with the same message and creates no tables, so the next boot with a fixed file seeds normally. Verified 2026-10-22 (6 checks) |
+| I23 | Engine answers after Reset (D42) | Request pending; Reset; the answer timer would have fired | Timer cancelled or answer dropped; no event on the new T-00x that reuses the id |
+| I24 | Dashboard after restart | Browser open during downtime | Banner shows within one poll; disappears on the first successful poll; selected task and view are kept |
+
 ## Future work
 
 These items are deliberately left out of phase 1 and will be listed in the README as intentional omissions.
