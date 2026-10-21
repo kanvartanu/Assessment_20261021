@@ -1,0 +1,49 @@
+Assumptions
+AI
+- After 30 second and 60 second, flag the task and allow button to manually reroute it.
+- engine accepts contributor randomly based on matching ids with the task.
+- 5 s pause after every reroute to allow infinite looping
+Mine
+- 2 expert areas python and c
+- contributor and task both have common id, python or c
+- timer on task (whether contributor has seen it or is working on it - simplicity)
+- timer on assignment
+- offer declined or expired, the task reroutes automatically without operator intervention needed
+- es
+  once a contribuotris assigned to task from engine, make it 1 assignee to a task for simplicity for now. that 1 assignee is there till task is not
+  rerouted or completed.
+- keep a record that same contributor cannot be on two different taasks at the same time. so a field will go in
+  contributor if contributor is active in a task.
+
+Corrections to ai
+- the 20% of requests that never return were missing from my plan.
+- atmost 1 contributor per task
+- priority was missing as a field
+- race conditions between operator intervention and normal system flow
+- separate jsons for expert areas, text going in assigments, text going in task, hyperparameters
+- what all info gaoes in a task
+- I agree with resuming timers. on engine restart
+- trying to simplifying the task like removing what all operator can do during intervention on a task
+
+Tests
+- contributor assigned by engine, update on operator dashboard
+- contributor not open task and it expires
+- hat if contributor
+  accepts and operator cancels at the same time. race condition or contribuotr submits the task and operator cancels or contribuotr submits assigment and
+  operatoe cancels.
+- after 70s the routed task comes back and a reroute of the same task is sent again after 60 sec.
+- several ids to 1 contributor.
+- no matching contributor. then engine retries 2 times more then contributor appears and match found
+- restart engine while task is active to a contributor and task resume with that clock timer and that contributor. while shutdown, error message on task to wait for the engine to come back up
+- operator revoke offer in between contributor working. 
+- reroute now from operator when routing already happening
+- multiple assigments in a task
+- cancel a task by contributor and read history and compare that history is maintained correctly.
+- 1 contributor 2 areas, 2 tasks 2 areas, both match, what does engine do?
+
+How I used AI
+- Session 1 - write design doc and tests in the design doc. write assumptions and flow and flowchart of the program and possible test cases
+- Session 2 - write gold ref
+- Session 3 - write validation test cases (because session 2 might hard code somethings to pass in test cases with its gold ref)
+- Session 4 - run validation test cases on gold and see what are gaps and reason for gaps and fill those gaps in appropriate areas
+- Session 5 - do session 4 again until the threshold of errors is reduced below 10%.
